@@ -1,0 +1,43 @@
+services:
+  wordpress:
+    image: wordpress:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-sonic-pro}-wordpress
+    ports:
+      - "${WORDPRESS_PORT:-8080}:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-sonicpro}
+      WORDPRESS_DB_USER: ${MYSQL_USER:-sonicpro}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-sonicpro_secret}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
+    volumes:
+      - ./wordpress:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mysql:8
+    container_name: ${COMPOSE_PROJECT_NAME:-sonic-pro}-db
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sonicpro}
+      MYSQL_USER: ${MYSQL_USER:-sonicpro}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sonicpro_secret}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_secret}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_secret}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  db_data:
+    name: ${COMPOSE_PROJECT_NAME:-sonic-pro}-db-data
