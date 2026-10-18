@@ -1,0 +1,357 @@
+{
+  "name": "Sonic Pro — Rapport hebdomadaire des demandes du site",
+  "nodes": [
+    {
+      "name": "Preview report (manual)",
+      "id": "890ccfe3-7129-4e6f-8f17-ee3869f65fc8",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Monday 09h Montreal",
+      "id": "ad760d82-eacd-4bf5-8890-eb8198754559",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "position": [
+        320,
+        0
+      ]
+    },
+    {
+      "name": "Read previous full week",
+      "id": "ed174649-a832-4460-b595-577edb75fd01",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boundary AS (SELECT date_trunc('week',now() AT TIME ZONE 'America/Toronto') AS local_end), period AS (SELECT (local_end-interval '7 days') AT TIME ZONE 'America/Toronto' AS start_at,local_end AT TIME ZONE 'America/Toronto' AS end_at FROM boundary), requests AS (SELECT m.* FROM public.sonicpro_hostinger_messages m,period p WHERE m.workflow_id='3v0xFd3DTeK7T34W:hostinger' AND m.source_form_match AND m.state<>'system_test' AND m.created_at>=p.start_at AND m.created_at<p.end_at) SELECT (SELECT to_char(min(created_at) AT TIME ZONE 'America/Toronto','YYYY-MM-DD') FROM public.sonicpro_hostinger_messages WHERE workflow_id='3v0xFd3DTeK7T34W:hostinger') AS tracking_since,to_char(p.start_at AT TIME ZONE 'America/Toronto','YYYY-MM-DD') AS period_start_date,to_char((p.end_at AT TIME ZONE 'America/Toronto')-interval '1 day','YYYY-MM-DD') AS period_last_date,p.start_at AS period_start,p.end_at AS period_end,'sonicpro:'||to_char(p.start_at AT TIME ZONE 'America/Toronto','YYYY-MM-DD') AS report_key,(SELECT count(*) FROM requests) AS total_requests,(SELECT count(DISTINCT lower(customer_email)) FROM requests WHERE customer_email IS NOT NULL AND customer_email<>'') AS distinct_submitted_emails,(SELECT count(*) FROM requests WHERE decision='process') AS approved_requests,(SELECT count(*) FROM requests WHERE reply_sent_at IS NOT NULL) AS acknowledged_requests,(SELECT count(*) FROM requests WHERE urgency='urgent') AS urgent_requests,(SELECT count(*) FROM requests WHERE urgency='uncertain') AS urgency_unknown,(SELECT count(*) FROM requests WHERE state='suspicious') AS rejected_requests,(SELECT count(*) FROM requests WHERE state='pending_review') AS pending_requests,(SELECT count(*) FROM requests WHERE state='delivery_failed') AS delivery_failures,(SELECT count(*) FROM requests WHERE state IN ('processing','sending')) AS in_progress,(SELECT count(*) FROM public.sonicpro_contacts c WHERE c.created_at>=p.start_at AND c.created_at<p.end_at) AS new_crm_contacts,(SELECT count(*) FROM public.sonicpro_contacts) AS total_crm_contacts,(SELECT count(*) FROM public.sonicpro_hostinger_messages WHERE workflow_id='3v0xFd3DTeK7T34W:hostinger' AND source_form_match AND state='pending_review') AS pending_backlog,(SELECT count(*) FROM public.sonicpro_hostinger_messages m WHERE m.workflow_id='3v0xFd3DTeK7T34W:hostinger' AND m.mailbox_processed_at>=p.start_at AND m.mailbox_processed_at<p.end_at) AS mailbox_handled,(SELECT count(*) FROM public.sonicpro_hostinger_messages m WHERE m.workflow_id='3v0xFd3DTeK7T34W:hostinger' AND m.state IN ('processed','suspicious') AND m.mailbox_processed_at IS NULL) AS mailbox_backlog,(SELECT count(*) FROM public.sonicpro_calendar_clicks c WHERE c.clicked_at>=p.start_at AND c.clicked_at<p.end_at) AS calendar_clicks,\n(SELECT count(DISTINCT c.token) FROM public.sonicpro_calendar_clicks c WHERE c.clicked_at>=p.start_at AND c.clicked_at<p.end_at) AS clicked_requests,\n(SELECT count(*) FROM public.sonicpro_calendar_bookings b WHERE b.link_token IS NOT NULL AND b.status='confirmed' AND b.event_created_at>=p.start_at AND b.event_created_at<p.end_at) AS matched_bookings,\n(SELECT count(*) FROM public.sonicpro_calendar_bookings b WHERE b.link_token IS NOT NULL AND b.status='cancelled' AND b.event_updated_at>=p.start_at AND b.event_updated_at<p.end_at) AS cancelled_bookings,\n(SELECT count(*) FROM public.sonicpro_sns_notifications s WHERE s.created_at>=p.start_at AND s.created_at<p.end_at) AS sns_archived,\n(SELECT count(*) FROM public.sonicpro_sns_notifications s WHERE s.state='accepted' AND s.created_at>=p.start_at AND s.created_at<p.end_at) AS sns_accepted,\n(SELECT count(*) FROM public.sonicpro_sns_notifications s WHERE s.state='failed' AND s.created_at>=p.start_at AND s.created_at<p.end_at) AS sns_failed,\n(SELECT count(*) FROM public.sonicpro_sns_notifications s WHERE s.state='pending' AND s.created_at>=p.start_at AND s.created_at<p.end_at) AS sns_pending,\n(SELECT last_success_at::text FROM public.sonicpro_integration_health WHERE integration='calendar_analytics') AS calendar_last_sync,\ncoalesce((SELECT last_success_at<now()-interval '15 minutes' FROM public.sonicpro_integration_health WHERE integration='calendar_analytics'),true) AS calendar_sync_stale FROM period p;",
+        "options": {}
+      },
+      "position": [
+        640,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Build aggregate report",
+      "id": "f617f524-39c6-434f-96d3-fee4bb8b056f",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const r=$json;const count=k=>{const n=Number(r[k]);if(!Number.isSafeInteger(n)||n<0)throw new Error('Invalid aggregate '+k);return n;};const text='📊 Sonic Pro — Rapport hebdomadaire\\n'+r.period_start_date+' au '+r.period_last_date+' (Montréal)\\nCatégorie : Intervention_Depuis_site_web\\nHistorique enregistré depuis : '+String(r.tracking_since||'aucun message')+'\\n\\nDemandes du site enregistrées : '+count('total_requests')+'\\nCourriels clients distincts soumis : '+count('distinct_submitted_emails')+'\\nDemandes approuvées : '+count('approved_requests')+'\\nAvec accusé envoyé : '+count('acknowledged_requests')+'\\nUrgentes selon le message/IA : '+count('urgent_requests')+'\\nUrgence indéterminée : '+count('urgency_unknown')+'\\nEn attente de validation : '+count('pending_requests')+'\\nRefusées / suspectes : '+count('rejected_requests')+'\\nÉchecs d’envoi : '+count('delivery_failures')+'\\nTraitement en cours : '+count('in_progress')+'\\n\\nNouveaux contacts CRM approuvés : '+count('new_crm_contacts')+'\\nTotal contacts CRM : '+count('total_crm_contacts')+'\\nAttente de validation, toutes dates : '+count('pending_backlog')+'\\n\\nStatuts constatés au moment du rapport. Aucun nom, téléphone ou courriel client n’est publié dans ce rapport.';const analytics='\\n\\n📬 Boîte Hostinger\\nMarqués lus et rangés dans Traite : '+count('mailbox_handled')+'\\nÀ ranger après traitement (toutes dates) : '+count('mailbox_backlog')+'\\n\\n📞 Agenda depuis les accusés\\nOuvertures du lien : '+count('calendar_clicks')+'\\nDemandes avec lien ouvert : '+count('clicked_requests')+'\\nRéservations associées par courriel : '+count('matched_bookings')+'\\nAnnulations associées : '+count('cancelled_bookings')+'\\nUn clic ne prouve pas une réservation ; les scanners de courriel peuvent ouvrir le lien. Association : même courriel, réservation créée après un clic dans les 30 jours.\\nDernière synchronisation : '+String(r.calendar_last_sync||'jamais')+(r.calendar_sync_stale?' ⚠️ Synchronisation en retard, chiffres potentiellement incomplets.':'')+'\\n\\n📨 Notifications SNS\\nCopies archivées : '+count('sns_archived')+'\\nAcceptées par AWS (MessageId) : '+count('sns_accepted')+'\\nÉchecs : '+count('sns_failed')+'\\nRésultat en attente : '+count('sns_pending')+'\\nAcceptation AWS ≠ preuve de réception par les abonnés.';return [{json:{...r,text:text+analytics},pairedItem:{item:0}}];"
+      },
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f106172-f08e-4598-b650-01be4637ef65",
+              "leftValue": "={{ $('Monday 09h Montreal').isExecuted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Scheduled run only",
+      "id": "01f9636c-4a80-4def-bb4b-f54b55a90057",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1280,
+        0
+      ]
+    },
+    {
+      "name": "Claim weekly publication",
+      "id": "cbbbb221-9c46-4818-aaab-b2fd0402ea9b",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH claimed AS (INSERT INTO public.sonicpro_weekly_reports(report_key,period_start,period_end) VALUES($1,$2::timestamptz,$3::timestamptz) ON CONFLICT DO NOTHING RETURNING report_key) SELECT $4::jsonb AS report FROM claimed;",
+        "options": {
+          "queryReplacement": "={{ [$json.report_key,$json.period_start,$json.period_end,JSON.stringify($json)] }}"
+        }
+      },
+      "position": [
+        0,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f106172-f08e-4598-b650-01be4637ef65",
+              "leftValue": "={{ !!$json.report }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Publication claim acquired",
+      "id": "1c862ad3-edac-4f53-806b-c851af6b852b",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        320,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-1004462159492",
+        "text": "={{ $json.report.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Send weekly summary to Telegram",
+      "id": "e1c4fff3-6175-4369-b9d8-17ab4ecf4189",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        320
+      ],
+      "webhookId": "781ed542-1e83-4cdb-8f0c-4fbf18fb1511",
+      "credentials": {
+        "telegramApi": {
+          "id": "QbeXL4XHlycgpz6F",
+          "name": "Telegram-admin-descision"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "name": "Record report delivered",
+      "id": "9b41eda3-2e29-4733-948a-1b49a88beb71",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_weekly_reports SET state='sent',telegram_message_id=$2::bigint,sent_at=now() WHERE report_key=$1 AND state='sending' RETURNING report_key,state;",
+        "options": {
+          "queryReplacement": "={{ [$('Build aggregate report').first().json.report_key,$json.result?.message_id || $json.message_id] }}"
+        }
+      },
+      "position": [
+        960,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Record report failure",
+      "id": "785381ef-1f43-4d45-a2f3-28b466679978",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_weekly_reports SET state='failed' WHERE report_key=$1 AND state='sending' RETURNING report_key,state;",
+        "options": {
+          "queryReplacement": "={{ [$('Build aggregate report').first().json.report_key] }}"
+        }
+      },
+      "position": [
+        1280,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Weekly reporting notes",
+      "id": "1608421d-0b52-4873-b5da-6ccda68d705f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "# Rapport hebdomadaire\nLundi 09:00 America/Toronto, semaine complète précédente. Déclenchement manuel : aperçu sans publication.\n\nDemandes, CRM, clics des liens d’accusé, réservations associées par correspondance du courriel après un clic dans les 30 jours, annulations, archive et acceptation SNS. Un clic ne prouve pas une réservation ; un MessageId SNS ne prouve pas la livraison. Les statuts sont ceux constatés au moment du rapport.\n\nAgrégats seulement : aucune coordonnée client. Alerte de synchronisation si le dernier succès dépasse 15 minutes. Publication unique par semaine.",
+        "height": 340,
+        "width": 620
+      },
+      "position": [
+        0,
+        -450
+      ]
+    }
+  ],
+  "connections": {
+    "Preview report (manual)": {
+      "main": [
+        [
+          {
+            "node": "Read previous full week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monday 09h Montreal": {
+      "main": [
+        [
+          {
+            "node": "Read previous full week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read previous full week": {
+      "main": [
+        [
+          {
+            "node": "Build aggregate report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build aggregate report": {
+      "main": [
+        [
+          {
+            "node": "Scheduled run only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled run only": {
+      "main": [
+        [
+          {
+            "node": "Claim weekly publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim weekly publication": {
+      "main": [
+        [
+          {
+            "node": "Publication claim acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send weekly summary to Telegram": {
+      "main": [
+        [
+          {
+            "node": "Record report delivered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record report failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publication claim acquired": {
+      "main": [
+        [
+          {
+            "node": "Send weekly summary to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "timezone": "America/Toronto",
+    "executionOrder": "v1"
+  }
+}

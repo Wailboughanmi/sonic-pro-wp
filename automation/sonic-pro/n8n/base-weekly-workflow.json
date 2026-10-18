@@ -1,0 +1,357 @@
+{
+  "name": "Sonic Pro \u2014 Rapport hebdomadaire des demandes du site",
+  "nodes": [
+    {
+      "name": "Preview report (manual)",
+      "id": "890ccfe3-7129-4e6f-8f17-ee3869f65fc8",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Monday 09h Montreal",
+      "id": "ad760d82-eacd-4bf5-8890-eb8198754559",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "position": [
+        320,
+        0
+      ]
+    },
+    {
+      "name": "Read previous full week",
+      "id": "ed174649-a832-4460-b595-577edb75fd01",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH boundary AS (SELECT date_trunc('week',now() AT TIME ZONE 'America/Toronto') AS local_end), period AS (SELECT (local_end-interval '7 days') AT TIME ZONE 'America/Toronto' AS start_at,local_end AT TIME ZONE 'America/Toronto' AS end_at FROM boundary), requests AS (SELECT m.* FROM public.sonicpro_hostinger_messages m,period p WHERE m.workflow_id='3v0xFd3DTeK7T34W:hostinger' AND m.source_form_match AND m.state<>'system_test' AND m.created_at>=p.start_at AND m.created_at<p.end_at) SELECT (SELECT to_char(min(created_at) AT TIME ZONE 'America/Toronto','YYYY-MM-DD') FROM public.sonicpro_hostinger_messages WHERE workflow_id='3v0xFd3DTeK7T34W:hostinger') AS tracking_since,to_char(p.start_at AT TIME ZONE 'America/Toronto','YYYY-MM-DD') AS period_start_date,to_char((p.end_at AT TIME ZONE 'America/Toronto')-interval '1 day','YYYY-MM-DD') AS period_last_date,p.start_at AS period_start,p.end_at AS period_end,'sonicpro:'||to_char(p.start_at AT TIME ZONE 'America/Toronto','YYYY-MM-DD') AS report_key,(SELECT count(*) FROM requests) AS total_requests,(SELECT count(DISTINCT lower(customer_email)) FROM requests WHERE customer_email IS NOT NULL AND customer_email<>'') AS distinct_submitted_emails,(SELECT count(*) FROM requests WHERE decision='process') AS approved_requests,(SELECT count(*) FROM requests WHERE reply_sent_at IS NOT NULL) AS acknowledged_requests,(SELECT count(*) FROM requests WHERE urgency='urgent') AS urgent_requests,(SELECT count(*) FROM requests WHERE urgency='uncertain') AS urgency_unknown,(SELECT count(*) FROM requests WHERE state='suspicious') AS rejected_requests,(SELECT count(*) FROM requests WHERE state='pending_review') AS pending_requests,(SELECT count(*) FROM requests WHERE state='delivery_failed') AS delivery_failures,(SELECT count(*) FROM requests WHERE state IN ('processing','sending')) AS in_progress,(SELECT count(*) FROM public.sonicpro_contacts c WHERE c.created_at>=p.start_at AND c.created_at<p.end_at) AS new_crm_contacts,(SELECT count(*) FROM public.sonicpro_contacts) AS total_crm_contacts,(SELECT count(*) FROM public.sonicpro_hostinger_messages WHERE workflow_id='3v0xFd3DTeK7T34W:hostinger' AND source_form_match AND state='pending_review') AS pending_backlog FROM period p;",
+        "options": {}
+      },
+      "position": [
+        640,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Build aggregate report",
+      "id": "f617f524-39c6-434f-96d3-fee4bb8b056f",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const r=$json;const count=k=>{const n=Number(r[k]);if(!Number.isSafeInteger(n)||n<0)throw new Error('Invalid aggregate '+k);return n;};const text='\ud83d\udcca Sonic Pro \u2014 Rapport hebdomadaire\\n'+r.period_start_date+' au '+r.period_last_date+' (Montr\u00e9al)\\nCat\u00e9gorie : Intervention_Depuis_site_web\\nHistorique enregistr\u00e9 depuis : '+String(r.tracking_since||'aucun message')+'\\n\\nDemandes du site enregistr\u00e9es : '+count('total_requests')+'\\nCourriels clients distincts soumis : '+count('distinct_submitted_emails')+'\\nDemandes approuv\u00e9es : '+count('approved_requests')+'\\nAvec accus\u00e9 envoy\u00e9 : '+count('acknowledged_requests')+'\\nUrgentes selon le message/IA : '+count('urgent_requests')+'\\nUrgence ind\u00e9termin\u00e9e : '+count('urgency_unknown')+'\\nEn attente de validation : '+count('pending_requests')+'\\nRefus\u00e9es / suspectes : '+count('rejected_requests')+'\\n\u00c9checs d\u2019envoi : '+count('delivery_failures')+'\\nTraitement en cours : '+count('in_progress')+'\\n\\nNouveaux contacts CRM approuv\u00e9s : '+count('new_crm_contacts')+'\\nTotal contacts CRM : '+count('total_crm_contacts')+'\\nAttente de validation, toutes dates : '+count('pending_backlog')+'\\n\\nStatuts constat\u00e9s au moment du rapport. Les r\u00e9servations Google Agenda ne sont pas mesur\u00e9es ici. Aucun nom, t\u00e9l\u00e9phone ou courriel client n\u2019est publi\u00e9 dans ce rapport.';return [{json:{...r,text},pairedItem:{item:0}}];"
+      },
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f106172-f08e-4598-b650-01be4637ef65",
+              "leftValue": "={{ $('Monday 09h Montreal').isExecuted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Scheduled run only",
+      "id": "01f9636c-4a80-4def-bb4b-f54b55a90057",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1280,
+        0
+      ]
+    },
+    {
+      "name": "Claim weekly publication",
+      "id": "cbbbb221-9c46-4818-aaab-b2fd0402ea9b",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH claimed AS (INSERT INTO public.sonicpro_weekly_reports(report_key,period_start,period_end) VALUES($1,$2::timestamptz,$3::timestamptz) ON CONFLICT DO NOTHING RETURNING report_key) SELECT $4::jsonb AS report FROM claimed;",
+        "options": {
+          "queryReplacement": "={{ [$json.report_key,$json.period_start,$json.period_end,JSON.stringify($json)] }}"
+        }
+      },
+      "position": [
+        0,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f106172-f08e-4598-b650-01be4637ef65",
+              "leftValue": "={{ !!$json.report }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Publication claim acquired",
+      "id": "1c862ad3-edac-4f53-806b-c851af6b852b",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        320,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-1004462159492",
+        "text": "={{ $json.report.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Send weekly summary to Telegram",
+      "id": "e1c4fff3-6175-4369-b9d8-17ab4ecf4189",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        320
+      ],
+      "webhookId": "781ed542-1e83-4cdb-8f0c-4fbf18fb1511",
+      "credentials": {
+        "telegramApi": {
+          "id": "QbeXL4XHlycgpz6F",
+          "name": "Telegram-admin-descision"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "name": "Record report delivered",
+      "id": "9b41eda3-2e29-4733-948a-1b49a88beb71",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_weekly_reports SET state='sent',telegram_message_id=$2::bigint,sent_at=now() WHERE report_key=$1 AND state='sending' RETURNING report_key,state;",
+        "options": {
+          "queryReplacement": "={{ [$('Build aggregate report').first().json.report_key,$json.result?.message_id || $json.message_id] }}"
+        }
+      },
+      "position": [
+        960,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Record report failure",
+      "id": "785381ef-1f43-4d45-a2f3-28b466679978",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_weekly_reports SET state='failed' WHERE report_key=$1 AND state='sending' RETURNING report_key,state;",
+        "options": {
+          "queryReplacement": "={{ [$('Build aggregate report').first().json.report_key] }}"
+        }
+      },
+      "position": [
+        1280,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Weekly reporting notes",
+      "id": "1608421d-0b52-4873-b5da-6ccda68d705f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "# Reporting hebdomadaire\nLundi 09:00 America/Toronto. Semaine compl\u00e8te pr\u00e9c\u00e9dente lundi\u2013dimanche, bornes calcul\u00e9es en heure locale (DST inclus).\n\nRapport agr\u00e9g\u00e9 seulement, canal -1004462159492. Pas de coordonn\u00e9es clients. Les statuts sont observ\u00e9s \u00e0 la date du rapport ; aucun indicateur de r\u00e9servation Agenda sans int\u00e9gration d\u00e9di\u00e9e.\n\nLe d\u00e9clencheur manuel permet de pr\u00e9visualiser sans envoyer. Une seule publication automatique par semaine ; un \u00e9chec n\u00e9cessite inspection avant relance. D\u00e9finir le fuseau du workflow America/Toronto avant publication.",
+        "height": 340,
+        "width": 620
+      },
+      "position": [
+        0,
+        -450
+      ]
+    }
+  ],
+  "connections": {
+    "Preview report (manual)": {
+      "main": [
+        [
+          {
+            "node": "Read previous full week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monday 09h Montreal": {
+      "main": [
+        [
+          {
+            "node": "Read previous full week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read previous full week": {
+      "main": [
+        [
+          {
+            "node": "Build aggregate report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build aggregate report": {
+      "main": [
+        [
+          {
+            "node": "Scheduled run only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled run only": {
+      "main": [
+        [
+          {
+            "node": "Claim weekly publication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim weekly publication": {
+      "main": [
+        [
+          {
+            "node": "Publication claim acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send weekly summary to Telegram": {
+      "main": [
+        [
+          {
+            "node": "Record report delivered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record report failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publication claim acquired": {
+      "main": [
+        [
+          {
+            "node": "Send weekly summary to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "timezone": "America/Toronto",
+    "executionOrder": "v1"
+  }
+}

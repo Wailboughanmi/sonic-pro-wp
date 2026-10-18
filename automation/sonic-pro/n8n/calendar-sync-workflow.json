@@ -1,0 +1,308 @@
+{
+  "name": "Sonic Pro — Synchronisation clics et rendez-vous",
+  "nodes": [
+    {
+      "name": "Every five minutes",
+      "id": "e3c98876-5fa5-4ac6-be65-121facc96c62",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Preview and synchronize (manual)",
+      "id": "3830bf1d-a938-415b-ae01-e0055ff6b051",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        250
+      ],
+      "parameters": {}
+    },
+    {
+      "name": "Read protected website calendar export",
+      "id": "5ec9d8ca-d796-41b1-83da-c0879c7e320a",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        0
+      ],
+      "parameters": {
+        "url": "https://sonicproelectricite.ca/calendar-api/automation-events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "U2nLezRj2g6zu8A0",
+          "name": "Sonic Pro — Calendar analytics export"
+        }
+      }
+    },
+    {
+      "name": "Validate calendar export",
+      "id": "42b2c822-1bcf-41eb-973d-77664ffbae17",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const d=$json;if(!Array.isArray(d.clicks)||!Array.isArray(d.bookings)||d.clicks.length>40000||d.bookings.length>25000)throw Error('Invalid calendar export');return [{json:{clicks:d.clicks,bookings:d.bookings}}];"
+      }
+    },
+    {
+      "name": "Synchronize clicks and confirmed bookings",
+      "id": "78ae1313-c6ce-4ca8-ae91-5defb2f410a3",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH data AS (SELECT $1::jsonb AS body),\nincoming_clicks AS (\n SELECT c.click_id,c.token,c.clicked_at FROM data,jsonb_to_recordset(body->'clicks') AS c(click_id text,token text,clicked_at timestamptz)\n JOIN public.sonicpro_calendar_links l ON l.token=c.token\n WHERE c.click_id ~ '^[a-f0-9]{32}$' AND c.clicked_at>=l.created_at AND c.clicked_at<=now()+interval '5 minutes'\n),new_clicks AS (\n INSERT INTO public.sonicpro_calendar_clicks(click_id,token,clicked_at) SELECT * FROM incoming_clicks\n ON CONFLICT(click_id) DO NOTHING RETURNING *\n),all_clicks AS (\n SELECT token,clicked_at FROM public.sonicpro_calendar_clicks UNION ALL SELECT token,clicked_at FROM new_clicks\n),incoming_events AS (\n SELECT e.* FROM data,jsonb_to_recordset(body->'bookings') AS e(event_id text,status text,source text,event_created_at timestamptz,event_updated_at timestamptz,starts_at timestamptz,ends_at timestamptz,attendee_emails jsonb)\n WHERE e.event_id IS NOT NULL AND e.status IN ('confirmed','tentative','cancelled') AND e.event_updated_at IS NOT NULL\n),attributed AS (\n SELECT e.*,a.token FROM incoming_events e LEFT JOIN LATERAL (\n  SELECT l.token FROM public.sonicpro_calendar_links l\n  JOIN public.sonicpro_hostinger_messages m USING(workflow_id,mailbox,message_id)\n  JOIN all_clicks c ON c.token=l.token\n  WHERE e.attendee_emails ? lower(m.customer_email) AND m.reply_sent_at IS NOT NULL\n  AND e.event_created_at>=m.reply_sent_at AND c.clicked_at<=e.event_created_at\n  AND c.clicked_at>=e.event_created_at-interval '30 days'\n  ORDER BY c.clicked_at DESC,l.created_at DESC,l.token LIMIT 1\n ) a ON true\n),saved AS (\n INSERT INTO public.sonicpro_calendar_bookings(event_id,status,source,event_created_at,event_updated_at,starts_at,ends_at,attendee_emails,link_token,attribution_method)\n SELECT event_id,status,source,coalesce(event_created_at,event_updated_at),event_updated_at,starts_at,ends_at,coalesce(attendee_emails,'[]'),token,CASE WHEN token IS NULL THEN 'unattributed' ELSE 'attendee_email_after_link_click_30d' END FROM attributed\n ON CONFLICT(event_id) DO UPDATE SET status=EXCLUDED.status,event_updated_at=EXCLUDED.event_updated_at,\n starts_at=coalesce(EXCLUDED.starts_at,sonicpro_calendar_bookings.starts_at),ends_at=coalesce(EXCLUDED.ends_at,sonicpro_calendar_bookings.ends_at),\n attendee_emails=CASE WHEN EXCLUDED.attendee_emails='[]'::jsonb THEN sonicpro_calendar_bookings.attendee_emails ELSE EXCLUDED.attendee_emails END,\n link_token=coalesce(EXCLUDED.link_token,sonicpro_calendar_bookings.link_token),\n attribution_method=CASE WHEN EXCLUDED.link_token IS NULL THEN sonicpro_calendar_bookings.attribution_method ELSE EXCLUDED.attribution_method END,synced_at=now()\n WHERE EXCLUDED.event_updated_at>=sonicpro_calendar_bookings.event_updated_at\n RETURNING event_id\n),health AS (\n INSERT INTO public.sonicpro_integration_health(integration,last_success_at) VALUES('calendar_analytics',now())\n ON CONFLICT(integration) DO UPDATE SET last_success_at=EXCLUDED.last_success_at RETURNING last_success_at\n)\nSELECT (SELECT count(*) FROM new_clicks) AS new_clicks,(SELECT count(*) FROM saved) AS synchronized_events,(SELECT last_success_at FROM health) AS last_success_at;\n",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Load handled mailbox messages",
+      "id": "1b51a88b-606f-4409-a244-fd9fe28bb274",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1280,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT workflow_id,mailbox,message_id,payload->>'rfcMessageId' AS rfc_message_id FROM public.sonicpro_hostinger_messages WHERE workflow_id='3v0xFd3DTeK7T34W:hostinger' AND state IN ('processed','suspicious') AND mailbox_processed_at IS NULL AND mailbox_mark_attempts<3 AND payload->>'rfcMessageId' ~ '^<[^<>[:space:]]+>$' ORDER BY created_at LIMIT 20;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Handled mailbox item present",
+      "id": "b0f3fe02-9fe4-414d-864b-efc3e6968c17",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(i=>i.json.rfc_message_id&&i.json.message_id);"
+      }
+    },
+    {
+      "name": "Mark read and move to Traite",
+      "id": "b508e289-735b-41e2-b75b-4f721cb04995",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://sonicproelectricite.ca/calendar-api/mailbox-processed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {message_id:$json.rfc_message_id} }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "U2nLezRj2g6zu8A0",
+          "name": "Sonic Pro — Calendar analytics export"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": false
+    },
+    {
+      "name": "Record mailbox handled",
+      "id": "1e235898-f2c9-4f5a-ab8c-28a8df1c8644",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_hostinger_messages SET mailbox_processed_at=now(),mailbox_mark_attempts=mailbox_mark_attempts+1,mailbox_mark_error=NULL WHERE workflow_id=$1 AND mailbox=$2 AND message_id=$3 AND $4::boolean RETURNING message_id,mailbox_processed_at;",
+        "options": {
+          "queryReplacement": "={{ [$('Handled mailbox item present').item.json.workflow_id,$('Handled mailbox item present').item.json.mailbox,$('Handled mailbox item present').item.json.message_id,$json.processed===true] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    },
+    {
+      "name": "Record mailbox failure",
+      "id": "1de425d2-5031-4d30-92de-b5dac7f64326",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2240,
+        250
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.sonicpro_hostinger_messages SET mailbox_mark_attempts=mailbox_mark_attempts+1,mailbox_mark_error='IMAP processing failed; inspect execution before retrying' WHERE workflow_id=$1 AND mailbox=$2 AND message_id=$3 RETURNING message_id,mailbox_mark_attempts;",
+        "options": {
+          "queryReplacement": "={{ [$('Handled mailbox item present').item.json.workflow_id,$('Handled mailbox item present').item.json.mailbox,$('Handled mailbox item present').item.json.message_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "dBMASYF3glPYJgi8",
+          "name": "TMT Reporting PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every five minutes": {
+      "main": [
+        [
+          {
+            "node": "Read protected website calendar export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preview and synchronize (manual)": {
+      "main": [
+        [
+          {
+            "node": "Read protected website calendar export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read protected website calendar export": {
+      "main": [
+        [
+          {
+            "node": "Validate calendar export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate calendar export": {
+      "main": [
+        [
+          {
+            "node": "Synchronize clicks and confirmed bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synchronize clicks and confirmed bookings": {
+      "main": [
+        [
+          {
+            "node": "Load handled mailbox messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load handled mailbox messages": {
+      "main": [
+        [
+          {
+            "node": "Handled mailbox item present",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handled mailbox item present": {
+      "main": [
+        [
+          {
+            "node": "Mark read and move to Traite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark read and move to Traite": {
+      "main": [
+        [
+          {
+            "node": "Record mailbox handled",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record mailbox failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "timezone": "America/Toronto",
+    "executionOrder": "v1"
+  }
+}

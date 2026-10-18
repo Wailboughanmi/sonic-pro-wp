@@ -1,0 +1,17 @@
+**/__pycache__/
+**/*.pyc
+**/secrets/
+**/runtime/
+**/backups/
+**/*key
+site/deployment-result.json
+site/original-hashes.json
+tests/preview-*.html
+tests/weekly-preview.txt
+tests/initialize.sql
+tests/database.sql
+
+# Version reviewed SQL sources; parent repository ignores database dumps.
+!n8n/analytics-schema.sql
+!n8n/sync.sql
+!n8n/weekly-report.sql

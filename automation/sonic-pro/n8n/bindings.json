@@ -1,0 +1,9 @@
+{
+  "calendarExportCredential": {
+    "id": "U2nLezRj2g6zu8A0",
+    "name": "Sonic Pro \u2014 Calendar analytics export"
+  },
+  "mainWorkflow": "3v0xFd3DTeK7T34W",
+  "weeklyWorkflow": "A3Qv3FO1X3nfVdbo",
+  "calendarSyncWorkflow": "YAmf1JpXaf8c4vvE"
+}
