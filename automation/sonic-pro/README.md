@@ -8,7 +8,7 @@ Les coordonnées sont extraites des champs du formulaire, avant le texte libre. 
 
 Après approbation automatique ou humaine : contact CRM, lien de calendrier, accusé SMTP, enregistrement du résultat, archivage de la notification SNS, publication AWS et conservation du `MessageId`. L’urgence ne constitue pas une confirmation d’intervention.
 
-L’accusé affiche d’abord la langue de la demande, puis l’autre langue. Si la langue est indéterminée, le français apparaît en premier. Chaque section présente un téléphone cliquable, son libellé et un lien de secours accessibles. L’icône reste statique dans les clients courriel qui ne prennent pas en charge l’animation. Les tarifs figurent dans un tableau bilingue à trois colonnes : service, première heure et heures suivantes. Le calendrier Google, les montants existants et les coordonnées de soutien sont conservés.
+L’accusé affiche d’abord la langue de la demande, puis l’autre langue. Si la langue est indéterminée, le français apparaît en premier. Chaque section présente un téléphone cliquable, son libellé et un lien de secours accessibles. Un GIF de combiné rouge avec ondes de sonnerie tourne en boucle. Il est hébergé sur le site Sonic Pro, sans service d’images tiers. Les clients courriel qui bloquent les animations affichent sa première image, déjà lisible comme un téléphone rouge qui sonne. Les tarifs figurent dans un tableau bilingue à trois colonnes : service, première heure et heures suivantes. Le calendrier Google, les montants existants et les coordonnées de soutien sont conservés.
 
 ## Liens de calendrier et mesure des rendez-vous
 
