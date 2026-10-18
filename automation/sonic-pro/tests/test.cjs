@@ -2,6 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const main=JSON.parse(fs.readFileSync(dir+'/main-workflow.json')),weekly=JSON.parse(fs.readFileSync(dir+'/weekly-workflow.json'));
 const get=n=>main.nodes.find(x=>x.name===n);
 const run=(code,env)=>new Function(...Object.keys(env),code)(...Object.values(env));
+const intake=run(get('Normalize Hostinger email').parameters.jsCode,{$input:{all:()=>[{json:{from:'support@sonicproelectricite.ca',subject:'Demande de contact',textPlain:'Nom: Test\nCourriel: client@example.com\nTéléphone:\nMessage: Hello, I need an electrician to inspect my panel.'}}]},Buffer})[0].json;assert.equal(intake.payload.language,'en');
 const source={recipient:'client@example.com',safeRecipient:true,contact:{fullName:'<Client>',requestText:'<script>unsafe</script> electrical repair'}};
 for(const language of ['fr','en']){
  const output=run(get('Code in JavaScript').parameters.jsCode,{$:n=>({item:{json:n==='Clean-full-message'?source:{language,token:'a'.repeat(64)}}})})[0].json;

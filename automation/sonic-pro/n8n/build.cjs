@@ -6,6 +6,10 @@ const add=(name,type,parameters,version=2)=>{const n={name,id:crypto.randomUUID(
 const pg=(name,query,queryReplacement)=>{const n=add(name,'postgres',{operation:'executeQuery',query,options:{queryReplacement}},2.6);n.credentials=structuredClone(node('Save approved CRM contact').credentials);return n;};
 const edge=(a,b,i=0)=>{p.connections[a]??={main:[]};while(p.connections[a].main.length<=i)p.connections[a].main.push([]);p.connections[a].main[i].push({node:b,type:'main',index:0});};
 node('Initialize Hostinger storage').parameters.query+='\n'+fs.readFileSync(dir+'/analytics-schema.sql','utf8');
+const normalize=node('Normalize Hostinger email');
+normalize.parameters.jsCode=fs.readFileSync(dir+'/language.js','utf8')+'\n'+normalize.parameters.jsCode.replace('const identity=','payload.language=requestLanguage(contact.requestText)===\'en\'?\'en\':\'fr\';const identity=');
+const intake=node('Store incoming email once');
+intake.parameters.query=intake.parameters.query.replace(',source_form_match) SELECT',',source_form_match,language) SELECT').replace("false) FROM identity","false),coalesce($4::jsonb->>'language','fr') FROM identity");
 const prepare=node('Prepare full message intent check');
 prepare.parameters.jsCode=fs.readFileSync(dir+'/language.js','utf8')+'\n'+prepare.parameters.jsCode.replace('subject:s.subject,fullReviewText:full,','subject:s.subject,customerRequest:String(s.contact?.requestText||full),languageHint:requestLanguage(s.contact?.requestText||full),fullReviewText:full,');
 const build=node('Build electrical intent request');
