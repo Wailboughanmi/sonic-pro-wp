@@ -15,3 +15,6 @@ tests/database.sql
 !n8n/analytics-schema.sql
 !n8n/sync.sql
 !n8n/weekly-report.sql
+
+!n8n/sent-schema.sql
+!n8n/record-sent-reply.sql

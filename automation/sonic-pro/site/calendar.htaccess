@@ -1,6 +1,6 @@
 Options -Indexes
 RewriteEngine On
-RewriteRule ^(?:availability|book|email-call|automation-events|mailbox-processed)/?$ index.php [L,QSA]
+RewriteRule ^(?:availability|book|email-call|automation-events|mailbox-processed|mailbox-sent)/?$ index.php [L,QSA]
 <FilesMatch "^(?!index\.php$).*\.php$">
 Require all denied
 </FilesMatch>

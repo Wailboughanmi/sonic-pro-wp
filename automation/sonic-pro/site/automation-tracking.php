@@ -14,11 +14,23 @@ function sonic_automation_route(string $path,string $method,array $config): void
         header('Cache-Control: no-store');header('Referrer-Policy: no-referrer');
         header('Location: https://calendar.app.google/MGyzFcUC1rWqWHMp6',true,302);exit;
     }
-    if(!in_array($path,['/calendar-api/automation-events','/calendar-api/mailbox-processed'],true))return;
+    if(!in_array($path,['/calendar-api/automation-events','/calendar-api/mailbox-processed','/calendar-api/mailbox-sent'],true))return;
     $keyPath=calendar_private().'/automation-reporting-key';
     $expected=is_file($keyPath)?trim(file_get_contents($keyPath)):'';
     $provided=$_SERVER['HTTP_X_SONIC_AUTOMATION_KEY']??'';
     if(strlen($expected)<32||!is_string($provided)||!hash_equals($expected,$provided))reply(['error'=>'Unauthorized'],401);
+    if($path==='/calendar-api/mailbox-sent') {
+        if($method!=='POST')reply(['error'=>'Method not allowed'],405);
+        if((int)($_SERVER['CONTENT_LENGTH']??0)>262144)reply(['error'=>'Payload too large'],413);
+        $raw=file_get_contents('php://input',false,null,0,262145);
+        if(strlen($raw)>262144)reply(['error'=>'Payload too large'],413);
+        $data=json_decode($raw,true);
+        if(!is_array($data))reply(['error'=>'Invalid archive payload'],400);
+        require_once __DIR__.'/mailbox-sent.php';
+        try {reply(sonic_archive_sent_copy($data));}
+        catch(InvalidArgumentException $e){reply(['error'=>$e->getMessage()],400);}
+        catch(Throwable $e){$safe=['Mailbox unavailable','IMAP unavailable','IMAP greeting rejected','Invalid IMAP search','Duplicate outgoing Message-ID','Message-ID mismatch','Archive already in progress','Sent folder not found','IMAP APPEND continuation rejected','IMAP APPEND result uncertain','IMAP APPEND verification failed','IMAP write failed'];reply(['error'=>'Sent copy archive failed; retry archive only, never resend SMTP','stage'=>in_array($e->getMessage(),$safe,true)?$e->getMessage():'IMAP transport error'],503);}
+    }
     if($path==='/calendar-api/mailbox-processed') {
         if($method!=='POST')reply(['error'=>'Method not allowed'],405);
         if((int)($_SERVER['CONTENT_LENGTH']??0)>2048)reply(['error'=>'Payload too large'],413);
